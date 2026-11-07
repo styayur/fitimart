@@ -30,5 +30,10 @@
     "typescript": "^5"
   },
   "description": "A static-first, RSS-powered simulated content marketplace with an exact configurable virtual economy.",
-  "type": "module"
+  "type": "module",
+  "overrides": {
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "11.0.4"
+    }
+  }
 }
