@@ -132,3 +132,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). Report ex
 ## License
 
 [Mozilla Public License 2.0](LICENSE). Third-party names and feed content remain subject to their owners' rights and terms.
+
+The GitHub Pages deploy also runs after a token-created merge through the post-merge dispatcher.
