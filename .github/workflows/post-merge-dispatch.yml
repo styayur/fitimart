@@ -90,7 +90,11 @@ jobs:
                   if runs:
                       print(json.dumps({"workflow": filename, "result": "already_started", "runs": runs}))
                       continue
-                  gh(["workflow", "run", filename, "--repo", repo, "--ref", sha])
-                  dispatched.append({"workflow": filename, "sha": sha})
+                  tip = gh(["api", f"repos/{repo}/commits/{default_branch}", "--jq", ".sha"]).strip()
+                  if tip != sha:
+                      print(json.dumps({"workflow": filename, "result": "default_branch_moved", "tip": tip, "sha": sha}))
+                      continue
+                  gh(["workflow", "run", filename, "--repo", repo, "--ref", default_branch])
+                  dispatched.append({"workflow": filename, "ref": default_branch, "sha": sha})
           print(json.dumps({"dispatched": dispatched}))
           PY
