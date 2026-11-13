@@ -2,6 +2,12 @@
 
 All notable changes are documented here. Fitimart is an experimental simulation project and does not follow a stable API or financial-data guarantee.
 
+## [Unreleased]
+
+### Fixed
+
+- Post-merge GitHub Pages deployment is dispatched on the default branch after a token merge, instead of using the raw merge SHA.
+
 ## [0.2.0-alpha.1] — 2026-11-07
 
 ### Added
