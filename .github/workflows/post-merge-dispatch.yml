@@ -1,0 +1,96 @@
+name: Post-merge dispatch
+
+on:
+  workflow_run:
+    workflows: ["Fitimart CI", "CodeForge regression"]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: post-merge-dispatch-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Dispatch missing push workflows after merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          PRS: ${{ toJson(github.event.workflow_run.pull_requests) }}
+        run: |
+          python3 - << 'PY'
+          import json, os, subprocess, time, urllib.parse
+
+          def gh(args):
+              result = subprocess.run(["gh", *args], check=False, capture_output=True, text=True)
+              if result.returncode != 0:
+                  raise SystemExit(result.stderr or result.stdout)
+              return result.stdout
+
+          def push_to_default(text, default_branch):
+              lines = text.replace("\r\n", "\n").splitlines()
+              start = next((i for i, line in enumerate(lines) if line.strip() == "on:"), None)
+              if start is None:
+                  return False
+              block = []
+              for line in lines[start + 1:]:
+                  if line and not line.startswith(" ") and not line.startswith("\t"):
+                      break
+                  block.append(line)
+              body = "\n".join(block)
+              if "pull_request:" in body or "tags:" in body and "branches:" not in body:
+                  return False
+              return "workflow_dispatch:" in body and "branches:" in body and default_branch in body
+
+          prs = json.loads(os.environ.get("PRS") or "[]")
+          if not prs:
+              print(json.dumps({"result": "no_pull_request"}))
+              raise SystemExit(0)
+          repo = os.environ["REPO"]
+          default_branch = gh(["repo", "view", repo, "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"]).strip()
+          dispatched = []
+          for item in prs:
+              number = item.get("number")
+              merged = None
+              for _ in range(24):
+                  view = json.loads(gh(["pr", "view", str(number), "--repo", repo, "--json", "state,mergedAt,mergeCommit"]))
+                  if view.get("state") == "MERGED" and (view.get("mergeCommit") or {}).get("oid"):
+                      merged = view
+                      break
+                  if view.get("state") == "CLOSED":
+                      break
+                  time.sleep(20)
+              if not merged:
+                  print(json.dumps({"pull_request": number, "result": "not_merged"}))
+                  continue
+              sha = merged["mergeCommit"]["oid"]
+              time.sleep(20)
+              listing = json.loads(gh(["api", f"repos/{repo}/contents/.github/workflows?ref={sha}"]))
+              for entry in listing:
+                  path = entry.get("path") or ""
+                  if not path.endswith((".yml", ".yaml")) or path.endswith("post-merge-dispatch.yml"):
+                      continue
+                  encoded = urllib.parse.quote(path)
+                  payload = json.loads(gh(["api", f"repos/{repo}/contents/{encoded}?ref={sha}"]))
+                  import base64
+                  text = base64.b64decode(payload["content"]).decode("utf-8")
+                  if not push_to_default(text, default_branch):
+                      continue
+                  filename = path.rsplit("/", 1)[-1]
+                  runs = json.loads(gh(["run", "list", "--repo", repo, "--workflow", filename, "--commit", sha, "--limit", "5", "--json", "databaseId,event,status"]))
+                  if runs:
+                      print(json.dumps({"workflow": filename, "result": "already_started", "runs": runs}))
+                      continue
+                  gh(["workflow", "run", filename, "--repo", repo, "--ref", sha])
+                  dispatched.append({"workflow": filename, "sha": sha})
+          print(json.dumps({"dispatched": dispatched}))
+          PY
